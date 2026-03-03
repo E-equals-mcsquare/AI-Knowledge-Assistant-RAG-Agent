@@ -1,0 +1,30 @@
+# ============================================================
+# AI Knowledge Assistant — Python dependencies
+# ============================================================
+# Pin minor versions for reproducible builds.
+# Run `pip install -r requirements.txt` to install.
+# Run `pip freeze > requirements-lock.txt` to capture exact
+# transitive versions for a fully reproducible production image.
+# ============================================================
+
+# --- Web framework ---
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.32.0,<1.0.0
+python-multipart>=0.0.12         # required for UploadFile / Form support
+
+# --- Data validation ---
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.5.0,<3.0.0
+
+# --- OpenAI ---
+openai>=1.50.0,<2.0.0            # Chat Completions + Embeddings API
+
+# --- Vector search ---
+faiss-cpu>=1.8.0                 # Pure-CPU FAISS; swap for faiss-gpu on GPU hosts
+numpy>=1.26.0,<3.0.0             # Required by faiss-cpu
+
+# --- Document parsing ---
+pdfplumber>=0.11.0               # PDF text extraction (wraps pdfminer.six)
+
+# --- Environment / config ---
+python-dotenv>=1.0.1             # .env file loading (used by pydantic-settings)

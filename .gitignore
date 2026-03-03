@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# Environment variables — NEVER commit secrets
+.env
+
+# Storage — FAISS index and metadata are runtime artifacts
+storage/faiss_index.index
+storage/metadata.json
+storage/*.index
+storage/*.json
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Docker
+*.env.docker
