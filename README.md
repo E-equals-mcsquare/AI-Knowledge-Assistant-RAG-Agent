@@ -4,7 +4,7 @@ Once the agent is running,
 
 ```bash
 curl -X POST http://localhost:8000/upload \
-  -F "file=@/path/to/your-doc.pdf"
+  -F "file=@/Users/souvikmajumder/Documents/AI_Knowledge_Assistant/AI-Knowledge-Assistant-RAG-Agent/documents/Database_Failover_Guide.pdf"
 ```
 
 ## Ask a question
