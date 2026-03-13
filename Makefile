@@ -1,3 +1,5 @@
+-include .env
+
 .PHONY: venv install setup run health lambda-package
 
 VENV     := .venv
@@ -8,8 +10,6 @@ UVICORN  := $(VENV)/bin/uvicorn
 HOST     := 0.0.0.0
 PORT     := 8000
 
-AWS_REGION=ap-south-1
-AWS_ACCOUNT_ID=XXXXXXXXXXXX
 ECR_REPO=ai-knowledge-assistant
 ECR_REGISTRY=$(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 IMAGE_URI=$(ECR_REGISTRY)/$(ECR_REPO):latest
@@ -101,5 +101,5 @@ docker-run:
 	docker run -d --name ai-knowledge-assistant -p $(PORT):$(PORT) --env-file .env ai-knowledge-assistant:latest
 
 docker-push:
-	docker tag ai-knowledge-assistant:latest ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/ai-knowledge-assistant:latest
-	docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/ai-knowledge-assistant:latest
+	docker tag ai-knowledge-assistant:latest ${ECR_REGISTRY}/ai-knowledge-assistant:latest
+	docker push ${ECR_REGISTRY}/ai-knowledge-assistant:latest
