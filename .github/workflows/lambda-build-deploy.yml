@@ -1,0 +1,171 @@
+# ============================================================
+# Lambda CI/CD — AI Knowledge Assistant document processor
+# ============================================================
+#
+# Triggered only when lambda/ or app/ source changes.
+#
+# Jobs:
+#   1. build   — install deps inside the exact Lambda runtime image
+#                (linux/amd64), zip handler + app/, upload as artifact
+#   2. deploy  — download artifact, push zip to Lambda, wait for update
+#
+# Why Docker for the build?
+#   pydantic-core and other packages ship compiled C extensions.
+#   Installing on the GitHub runner (Linux x86_64) still needs to match
+#   the Lambda runtime (Amazon Linux 2023 / x86_64). Building inside
+#   public.ecr.aws/lambda/python:3.14 — the exact image Lambda runs —
+#   guarantees compatible binaries.
+#
+# Authentication:
+#   Reuses the same OIDC role as build-and-deploy.yml.
+#   The role additionally needs lambda:UpdateFunctionCode.
+#   Run: make attach-lambda-policy
+#
+# Required GitHub Secrets:
+#   AWS_ROLE_ARN          — arn:aws:iam::XXXXXXXX:role/github-actions-deploy
+#
+# Required GitHub Variables (Settings → Variables):
+#   AWS_REGION            — ap-south-1
+#   LAMBDA_FUNCTION_NAME  — ai-knowledge-assistant-document-processor
+# ============================================================
+
+name: Lambda Build & Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "lambda/**"
+      - "app/**"
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual deploy"
+        required: false
+        default: "Manual trigger"
+
+permissions:
+  id-token: write  # required for OIDC token
+  contents: read
+
+concurrency:
+  group: lambda-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION:           ${{ vars.AWS_REGION           || 'ap-south-1' }}
+  LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'ai-knowledge-assistant-document-processor' }}
+  LAMBDA_IMAGE:         public.ecr.aws/lambda/python:3.14
+  LAMBDA_BUILD_DIR:     .lambda-build
+  LAMBDA_ZIP:           lambda-package.zip
+
+# ── Job 1: Build ──────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: Build Lambda Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Docker is pre-installed on ubuntu-latest.
+      # Pull the Lambda runtime image so the pip install runs in the right env.
+      - name: Pull Lambda runtime image
+        run: docker pull --platform linux/amd64 ${{ env.LAMBDA_IMAGE }}
+
+      - name: Install dependencies inside Lambda image
+        run: |
+          mkdir -p ${{ env.LAMBDA_BUILD_DIR }}
+
+          docker run --rm \
+            --platform linux/amd64 \
+            --entrypoint "" \
+            -v "${{ github.workspace }}/lambda/requirements.txt:/requirements.txt:ro" \
+            -v "${{ github.workspace }}/${{ env.LAMBDA_BUILD_DIR }}:/out" \
+            ${{ env.LAMBDA_IMAGE }} \
+            pip install -r /requirements.txt --target /out --upgrade --quiet
+
+      - name: Copy handler and app source
+        run: |
+          cp lambda/document_processor.py ${{ env.LAMBDA_BUILD_DIR }}/document_processor.py
+          cp -r app ${{ env.LAMBDA_BUILD_DIR }}/app
+
+      - name: Zip package
+        run: |
+          cd ${{ env.LAMBDA_BUILD_DIR }}
+          zip -r ../${{ env.LAMBDA_ZIP }} . \
+            -x "*.pyc" \
+            -x "*/__pycache__/*" \
+            -x "*.dist-info/*" \
+            -x "*.egg-info/*"
+          cd ..
+          echo "Package size: $(du -sh ${{ env.LAMBDA_ZIP }} | cut -f1)"
+
+      # Upload the zip as an artifact so the deploy job can download it
+      # without needing to redo the Docker build.
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-package-${{ github.sha }}
+          path: ${{ env.LAMBDA_ZIP }}
+          retention-days: 7
+
+# ── Job 2: Deploy ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Lambda
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-package-${{ github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - name: Update Lambda function code
+        run: |
+          echo "Deploying ${{ env.LAMBDA_ZIP }} → ${{ env.LAMBDA_FUNCTION_NAME }}"
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://${{ env.LAMBDA_ZIP }} \
+            --output json \
+          | jq '{FunctionName, CodeSize, LastModified, State}'
+
+      # Wait for the update to finish before publishing a version.
+      # Lambda applies code changes asynchronously; publishing too early fails.
+      - name: Wait for update to complete
+        run: |
+          echo "Waiting for function update..."
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          echo "Update complete."
+
+      - name: Publish new version
+        id: publish
+        run: |
+          VERSION=$(aws lambda publish-version \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --description "Deploy ${{ github.sha }}" \
+            --output text --query 'Version')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Published version: ${VERSION}"
+
+      - name: Summary
+        run: |
+          echo "### Lambda deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Function | \`${{ env.LAMBDA_FUNCTION_NAME }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version  | \`${{ steps.publish.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit   | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
