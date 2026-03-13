@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-knowledge-assistant
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io  # cascade-delete on app removal
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/E-equals-mcsquare/AI-Knowledge-Assistant-RAG-Agent.git
+    targetRevision: main
+    path: k8s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+
+  syncPolicy:
+    automated:
+      prune: true      # remove resources deleted from git
+      selfHeal: true   # revert manual kubectl changes
+    syncOptions:
+      - CreateNamespace=true
