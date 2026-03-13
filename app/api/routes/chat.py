@@ -21,10 +21,18 @@ Error handling:
   - 500  Internal Error    — retrieval or LLM API failure
 """
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import get_llm_service, get_retrieval_service
 from app.core.logging import get_logger
+from app.core.metrics import (
+    llm_generation_latency_seconds,
+    rag_request_latency_seconds,
+    rag_requests_total,
+    vector_search_latency_seconds,
+)
 from app.models.request import ChatRequest
 from app.models.response import ChatResponse, ChunkSource
 from app.services.llm_service import LLMService
@@ -75,14 +83,19 @@ async def chat(
         f"top_k_override={request.top_k}"
     )
 
+    t_total = time.perf_counter()
+
     # --- Step 1: Retrieval ---
     try:
+        t0 = time.perf_counter()
         retrieved_chunks = retrieval_service.retrieve(
             query=request.question,
             top_k=request.top_k,
         )
+        vector_search_latency_seconds.observe(time.perf_counter() - t0)
     except Exception as exc:
         logger.error(f"Retrieval failed: {exc}")
+        rag_requests_total.labels(status="error").inc()
         raise HTTPException(
             status_code=500,
             detail=f"Retrieval error: {str(exc)}",
@@ -93,6 +106,8 @@ async def chat(
         logger.info(
             "No chunks passed similarity threshold — returning fallback response."
         )
+        rag_request_latency_seconds.observe(time.perf_counter() - t_total)
+        rag_requests_total.labels(status="success").inc()
         return ChatResponse(answer=_NOT_FOUND_ANSWER, sources=[])
 
     # --- Step 3 & 4: Prompt + generation ---
@@ -101,9 +116,12 @@ async def chat(
             question=request.question,
             chunks=retrieved_chunks,
         )
+        t0 = time.perf_counter()
         answer = llm_service.generate(messages=messages)
+        llm_generation_latency_seconds.observe(time.perf_counter() - t0)
     except Exception as exc:
         logger.error(f"LLM generation failed: {exc}")
+        rag_requests_total.labels(status="error").inc()
         raise HTTPException(
             status_code=500,
             detail=f"Answer generation error: {str(exc)}",
@@ -118,6 +136,9 @@ async def chat(
         )
         for chunk in retrieved_chunks
     ]
+
+    rag_request_latency_seconds.observe(time.perf_counter() - t_total)
+    rag_requests_total.labels(status="success").inc()
 
     logger.info(
         f"Chat response generated | sources={len(sources)} | "

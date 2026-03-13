@@ -21,6 +21,7 @@ from openai import OpenAI, OpenAIError
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.core.metrics import llm_tokens_total
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,8 @@ class LLMService:
                 f"completion_tokens={usage.completion_tokens} | "
                 f"total_tokens={usage.total_tokens}"
             )
+            llm_tokens_total.labels(type="prompt").inc(usage.prompt_tokens)
+            llm_tokens_total.labels(type="completion").inc(usage.completion_tokens)
             return answer
 
         except OpenAIError as exc:

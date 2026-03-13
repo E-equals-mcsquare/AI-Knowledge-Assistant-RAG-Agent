@@ -31,6 +31,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.dependencies import (
     _get_embedding_service,
@@ -153,6 +154,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(upload.router, tags=["Ingestion"])
 app.include_router(chat.router, tags=["Retrieval & Generation"])
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics — exposes /metrics for Prometheus scraping
+# ---------------------------------------------------------------------------
+
+Instrumentator().instrument(app).expose(app)
 
 # ---------------------------------------------------------------------------
 # Health check

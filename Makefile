@@ -1,6 +1,10 @@
 -include .env
 
-.PHONY: venv install setup run health lambda-package
+.PHONY: venv install setup run health lambda-package \
+        monitoring-install monitoring-upgrade monitoring-uninstall \
+        monitoring-namespace monitoring-repo monitoring-apply monitoring-status \
+        grafana-forward grafana-password prometheus-forward alertmanager-forward \
+        monitoring-logs
 
 VENV     := .venv
 PYTHON   := $(VENV)/bin/python
@@ -103,3 +107,103 @@ docker-run:
 docker-push:
 	docker tag ai-knowledge-assistant:latest ${ECR_REGISTRY}/ai-knowledge-assistant:latest
 	docker push ${ECR_REGISTRY}/ai-knowledge-assistant:latest
+
+docker-build-push: docker-login docker-build docker-push
+
+# ── Observability (kube-prometheus-stack) ─────────────────────────────────────
+
+HELM_RELEASE      := monitoring
+MONITORING_NS     := monitoring
+GRAFANA_PORT      := 3000
+PROMETHEUS_PORT   := 9090
+ALERTMANAGER_PORT := 9093
+GRAFANA_PASSWORD  ?= admin123
+RETENTION         ?= 7d
+
+monitoring-namespace:
+	kubectl create namespace $(MONITORING_NS) --dry-run=client -o yaml | kubectl apply -f -
+
+monitoring-repo:
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	helm repo update
+
+monitoring-install: monitoring-namespace monitoring-repo
+	helm install $(HELM_RELEASE) prometheus-community/kube-prometheus-stack \
+		--namespace $(MONITORING_NS) \
+		--set grafana.adminPassword=$(GRAFANA_PASSWORD) \
+		--set prometheus.prometheusSpec.retention=$(RETENTION) \
+		--wait
+	@echo "✔  kube-prometheus-stack installed"
+	@echo "   make grafana-forward    → http://localhost:$(GRAFANA_PORT)"
+	@echo "   make prometheus-forward → http://localhost:$(PROMETHEUS_PORT)"
+
+monitoring-upgrade:
+	helm upgrade $(HELM_RELEASE) prometheus-community/kube-prometheus-stack \
+		--namespace $(MONITORING_NS) \
+		--set grafana.adminPassword=$(GRAFANA_PASSWORD) \
+		--set prometheus.prometheusSpec.retention=$(RETENTION) \
+		--reuse-values
+
+monitoring-uninstall:
+	helm uninstall $(HELM_RELEASE) --namespace $(MONITORING_NS)
+	kubectl delete namespace $(MONITORING_NS)
+
+monitoring-apply:
+	kubectl apply -f k8s/service.yaml
+	kubectl apply -f k8s/service-monitor.yaml
+	@echo "✔  ServiceMonitor applied — Prometheus will scrape /metrics in ~30s"
+
+monitoring-status:
+	@echo "── Pods ──────────────────────────────────────────────────"
+	kubectl get pods -n $(MONITORING_NS)
+	@echo ""
+	@echo "── Services ──────────────────────────────────────────────"
+	kubectl get svc -n $(MONITORING_NS)
+	@echo ""
+	@echo "── ServiceMonitors ───────────────────────────────────────"
+	kubectl get servicemonitor -n $(MONITORING_NS)
+
+grafana-forward:
+	@echo "Grafana → http://localhost:$(GRAFANA_PORT)  (user: admin)"
+	kubectl port-forward svc/$(HELM_RELEASE)-grafana $(GRAFANA_PORT):80 -n $(MONITORING_NS)
+
+prometheus-forward:
+	@echo "Prometheus → http://localhost:$(PROMETHEUS_PORT)"
+	kubectl port-forward svc/$(HELM_RELEASE)-kube-prometheus-prometheus $(PROMETHEUS_PORT):9090 -n $(MONITORING_NS)
+
+alertmanager-forward:
+	@echo "Alertmanager → http://localhost:$(ALERTMANAGER_PORT)"
+	kubectl port-forward svc/$(HELM_RELEASE)-kube-prometheus-alertmanager $(ALERTMANAGER_PORT):9093 -n $(MONITORING_NS)
+
+grafana-password:
+	@kubectl get secret $(HELM_RELEASE)-grafana -n $(MONITORING_NS) \
+		-o jsonpath="{.data.admin-password}" | base64 --decode
+	@echo ""
+
+monitoring-logs:
+	kubectl logs -n $(MONITORING_NS) -l app.kubernetes.io/name=prometheus --tail=50
+
+port-forward-pod:
+	kubectl port-forward pod/ai-knowledge-assistant-dd8fc6b84-m4b6b 8001:8000
+
+scale-down-deployment:
+	kubectl scale deployment/ai-knowledge-assistant --replicas=0
+
+scale-up-deployment:
+	kubectl scale deployment/ai-knowledge-assistant --replicas=1
+
+restart-pod: scale-down-deployment scale-up-deployment
+	kubectl rollout restart deployment ai-knowledge-assistant
+
+scale-up-nodegroup:
+	aws eks update-nodegroup-config \
+	--cluster-name ai-knowledge-cluster \
+	--nodegroup-name rag-workers \
+	--scaling-config minSize=1,maxSize=4,desiredSize=4 \
+	--region $(AWS_REGION)
+
+
+test-chat:
+	curl -s -X POST $(EXTERNAL_IP)/chat \
+	-H "Content-Type: application/json" \
+	-d '{"question": "What is the scaling strategy in Kubernetes?"}' | python3 -m json.tool

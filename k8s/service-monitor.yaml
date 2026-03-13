@@ -1,0 +1,41 @@
+# ============================================================
+# ServiceMonitor — tells Prometheus Operator to scrape FastAPI
+# ============================================================
+# How it works:
+#   kube-prometheus-stack installs a Prometheus Operator that watches
+#   ServiceMonitor resources. When this manifest is applied, Prometheus
+#   automatically adds the FastAPI pod as a scrape target.
+#
+# Prerequisites:
+#   - kube-prometheus-stack installed in the "monitoring" namespace
+#   - Service ai-knowledge-assistant-service must have port named "http"
+#     (already set in service.yaml)
+#
+# The label `release: monitoring` MUST match the Helm release name used
+# when installing kube-prometheus-stack (default: "monitoring").
+# ============================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-knowledge-assistant
+  namespace: monitoring            # must live in the monitoring namespace
+  labels:
+    release: monitoring            # matches kube-prometheus-stack serviceMonitorSelector
+
+spec:
+  # Which namespace to look for the Service in
+  namespaceSelector:
+    matchNames:
+      - default
+
+  # Match the FastAPI Service by its pod selector label
+  selector:
+    matchLabels:
+      app: ai-knowledge-assistant
+
+  endpoints:
+    - port: http                   # matches the named port in service.yaml
+      path: /metrics               # exposed by prometheus_fastapi_instrumentator
+      interval: 15s                # how often Prometheus scrapes
+      scrapeTimeout: 10s
