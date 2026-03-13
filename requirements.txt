@@ -22,9 +22,13 @@ openai>=1.50.0,<2.0.0            # Chat Completions + Embeddings API
 # --- Vector search ---
 faiss-cpu>=1.8.0                 # Pure-CPU FAISS; swap for faiss-gpu on GPU hosts
 numpy>=1.26.0,<3.0.0             # Required by faiss-cpu
+pinecone>=5.0.0                  # Pinecone managed vector DB (optional backend)
 
 # --- Document parsing ---
 pdfplumber>=0.11.0               # PDF text extraction (wraps pdfminer.six)
+
+# --- AWS ---
+boto3>=1.35.0,<2.0.0            # S3 presigned URLs + Lambda document processor
 
 # --- Environment / config ---
 python-dotenv>=1.0.1             # .env file loading (used by pydantic-settings)

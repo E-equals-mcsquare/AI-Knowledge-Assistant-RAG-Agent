@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-knowledge-assistant
+  labels:
+    app: ai-knowledge-assistant
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: ai-knowledge-assistant
+
+  template:
+    metadata:
+      labels:
+        app: ai-knowledge-assistant
+
+    spec:
+      serviceAccountName: ai-knowledge-assistant-sa # IRSA — grants pod access to Secrets Manager
+
+      containers:
+      - name: ai-knowledge-assistant
+
+        image: 258173133840.dkr.ecr.ap-south-1.amazonaws.com/ai-knowledge-assistant:latest
+
+        ports:
+        - containerPort: 8000
+
+        envFrom:
+        - configMapRef:
+            name: ai-assistant-config
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 3
+
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+

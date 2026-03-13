@@ -1,0 +1,42 @@
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# ── Virtual environments ─────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Secrets — NEVER bake into the image ─────────────────────
+.env
+*.env
+
+# ── Local FAISS data — mount as a volume at runtime ─────────
+storage/
+
+# ── Lambda handler (deployed separately, not needed in API image) ──
+lambda/
+
+# ── Dev / test artefacts ─────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.log
+
+# ── VCS ─────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Docs / samples ──────────────────────────────────────────
+documents/
+README.md
+Makefile

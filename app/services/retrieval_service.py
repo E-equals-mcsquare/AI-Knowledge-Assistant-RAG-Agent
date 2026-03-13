@@ -28,7 +28,7 @@ from typing import List, Optional
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.embedding_service import EmbeddingService
-from app.services.vector_store import ChunkMetadata, VectorStoreService
+from app.services.vector_store import ChunkMetadata, VectorStoreProtocol
 
 logger = get_logger(__name__)
 
@@ -52,7 +52,7 @@ class RetrievalService:
     def __init__(
         self,
         embedding_service: EmbeddingService,
-        vector_store: VectorStoreService,
+        vector_store: VectorStoreProtocol,
         settings: Settings,
     ) -> None:
         self._embedding_service = embedding_service

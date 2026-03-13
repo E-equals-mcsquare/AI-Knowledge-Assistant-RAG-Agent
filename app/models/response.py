@@ -107,6 +107,68 @@ class UploadResponse(BaseModel):
     }
 
 
+class UploadJobResponse(BaseModel):
+    """
+    Response returned by POST /upload when DOCUMENT_STORE_BACKEND=s3.
+
+    Processing is asynchronous: the file has NOT been embedded yet.
+    The client must PUT the file to `presigned_url`, after which the S3 event
+    triggers the Lambda document processor.
+    """
+
+    document_id: str = Field(
+        ...,
+        description="UUID assigned to this document. Use it to track processing status.",
+    )
+    filename: str = Field(
+        ...,
+        description="Original filename as received by the API.",
+    )
+    presigned_url: str = Field(
+        ...,
+        description=(
+            "Presigned S3 PUT URL. The client must HTTP PUT the raw file bytes "
+            "to this URL within the expiry window. No auth headers required — "
+            "the signature is embedded in the URL query string."
+        ),
+    )
+    s3_key: str = Field(
+        ...,
+        description="S3 object key where the file will be stored.",
+    )
+    expires_in: int = Field(
+        ...,
+        description="Presigned URL validity in seconds.",
+    )
+    status: str = Field(
+        default="pending_upload",
+        description=(
+            "Current state: 'pending_upload' — the client has not yet PUT the file. "
+            "Once uploaded, Lambda processes it asynchronously."
+        ),
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable instructions for the next step.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "document_id": "3f7e1b2a-84c0-4d9e-b5a1-0f2c8e6d4321",
+                    "filename": "architecture-guide.pdf",
+                    "presigned_url": "https://bucket.s3.amazonaws.com/documents/3f7e1b2a/architecture-guide.pdf?X-Amz-Signature=...",
+                    "s3_key": "documents/3f7e1b2a-84c0-4d9e-b5a1-0f2c8e6d4321/architecture-guide.pdf",
+                    "expires_in": 900,
+                    "status": "pending_upload",
+                    "message": "PUT the file to presigned_url. Processing starts automatically after upload.",
+                }
+            ]
+        }
+    }
+
+
 class HealthResponse(BaseModel):
     """Response returned by GET /health."""
 
@@ -115,5 +177,5 @@ class HealthResponse(BaseModel):
     version: str
     vector_store_size: int = Field(
         ...,
-        description="Number of vectors currently stored in the FAISS index.",
+        description="Number of vectors currently stored in the vector index.",
     )

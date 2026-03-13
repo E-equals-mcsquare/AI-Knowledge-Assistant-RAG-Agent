@@ -23,16 +23,50 @@ import json
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
-import faiss
-import numpy as np
+try:
+    import faiss
+    import numpy as np
+except ImportError:
+    # faiss-cpu and numpy are not installed in the Lambda environment
+    # (Lambda uses Pinecone exclusively). VectorStoreService cannot be
+    # instantiated without them, but ChunkMetadata and VectorStoreProtocol
+    # are importable and that is all the Lambda handler needs.
+    faiss = None  # type: ignore[assignment]
+    np = None  # type: ignore[assignment]
 
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.document_processor import TextChunk
 
 logger = get_logger(__name__)
+
+
+@runtime_checkable
+class VectorStoreProtocol(Protocol):
+    """
+    Structural interface that every vector store backend must satisfy.
+
+    Both VectorStoreService (FAISS) and PineconeVectorStoreService implement
+    this protocol implicitly — no inheritance required.
+    Use this type in any code that should work with either backend.
+    """
+
+    def add_chunks(
+        self,
+        chunks: List[TextChunk],
+        embeddings: List[List[float]],
+    ) -> None: ...
+
+    def search(
+        self,
+        query_embedding: List[float],
+        top_k: int,
+    ) -> List[Tuple["ChunkMetadata", float]]: ...
+
+    @property
+    def total_vectors(self) -> int: ...
 
 
 @dataclass
@@ -71,7 +105,9 @@ class VectorStoreService:
         self._index_path = Path(settings.FAISS_INDEX_PATH)
         self._metadata_path = Path(settings.METADATA_PATH)
         self._embedding_dim: Optional[int] = None
-        self._index: Optional[faiss.IndexFlatIP] = None
+        # Typed as Any: faiss-cpu ships no type stubs, so Optional[faiss.IndexFlatIP]
+        # causes Pylance to flag every attribute access (.d, .ntotal, .add, .search).
+        self._index: Any = None
         self._metadata: Dict[int, ChunkMetadata] = {}  # faiss_id → ChunkMetadata
         self._lock = threading.RLock()
 

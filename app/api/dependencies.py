@@ -5,33 +5,35 @@ FastAPI dependency providers for all injectable services.
 
 Pattern used:
   - Module-level lru_cache'd factory functions create application singletons
-    (EmbeddingService, VectorStoreService, LLMService) that are instantiated
-    once and reused across all requests.
+    (EmbeddingService, VectorStoreService / PineconeVectorStoreService, LLMService).
   - FastAPI Depends() wires these into route handlers without the route
     needing to know about construction details.
-  - RetrievalService is the only "composite" dependency — it is also cached
-    because it simply wraps already-cached sub-services.
+  - RetrievalService wraps the active vector store and is also cached.
 
-Why lru_cache instead of FastAPI lifespan state?
-  - Simpler: no need to store objects on app.state
-  - Testable: call get_settings.cache_clear() / _get_vector_store.cache_clear()
-    between test runs to get fresh instances.
-  - Works correctly with FastAPI's dependency injection even outside a
-    request context (e.g. CLI scripts, background tasks).
+Backend switching:
+  Set VECTOR_STORE_BACKEND=faiss    → uses local FAISS (default, no extra config)
+  Set VECTOR_STORE_BACKEND=pinecone → uses Pinecone (requires PINECONE_API_KEY)
+  Set DOCUMENT_STORE_BACKEND=s3    → enables S3Service for presigned upload URLs
+  No other file needs to change.
 
-Future:
-  - Swap VectorStoreService provider for a managed-DB adapter
-    (Pinecone, pgvector) by changing only this file.
-  - Add an async variant using AsyncOpenAI for streaming endpoints.
+Testability:
+  Call _get_vector_store.cache_clear() / get_settings.cache_clear() between
+  test runs, or override via app.dependency_overrides in pytest fixtures.
 """
 
 from functools import lru_cache
+from typing import Optional
 
 from app.core.config import Settings, get_settings
+from app.core.logging import get_logger
 from app.services.embedding_service import EmbeddingService
 from app.services.llm_service import LLMService
 from app.services.retrieval_service import RetrievalService
-from app.services.vector_store import VectorStoreService
+from app.services.s3_service import S3Service
+from app.services.vector_store import VectorStoreProtocol, VectorStoreService
+from app.services.vector_store_pinecone import PineconeVectorStoreService
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -45,13 +47,23 @@ def _get_embedding_service() -> EmbeddingService:
 
 
 @lru_cache(maxsize=1)
-def _get_vector_store() -> VectorStoreService:
+def _get_vector_store() -> VectorStoreProtocol:
     """
-    Application-wide VectorStoreService singleton.
+    Return the configured vector store backend singleton.
 
-    Loads the persisted FAISS index from disk on first call.
+    Reads VECTOR_STORE_BACKEND from settings:
+      - "faiss"    → VectorStoreService     (local, no extra config)
+      - "pinecone" → PineconeVectorStoreService (requires PINECONE_API_KEY)
     """
-    return VectorStoreService(settings=get_settings())
+    settings = get_settings()
+    backend = settings.VECTOR_STORE_BACKEND
+
+    if backend == "pinecone":
+        logger.info("Vector store backend: Pinecone")
+        return PineconeVectorStoreService(settings=settings)
+
+    logger.info("Vector store backend: FAISS (local)")
+    return VectorStoreService(settings=settings)
 
 
 @lru_cache(maxsize=1)
@@ -70,11 +82,24 @@ def _get_retrieval_service() -> RetrievalService:
     )
 
 
+@lru_cache(maxsize=1)
+def _get_s3_service() -> Optional[S3Service]:
+    """
+    Return the S3Service singleton when DOCUMENT_STORE_BACKEND=s3, else None.
+
+    S3Service is only instantiated when AWS_BUCKET_NAME is configured.
+    Returns None in local mode so routes can remain unaware of the backend.
+    """
+    settings = get_settings()
+    if settings.DOCUMENT_STORE_BACKEND == "s3":
+        logger.info("Document store backend: S3 (presigned URL mode)")
+        return S3Service(settings=settings)
+    logger.info("Document store backend: local (synchronous in-process)")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # FastAPI dependency callables
-# These are the functions passed to Depends() in route handlers.
-# Keeping them separate from the lru_cache'd factories makes type annotations
-# cleaner and allows per-request override in tests via app.dependency_overrides.
 # ---------------------------------------------------------------------------
 
 def get_settings_dep() -> Settings:
@@ -87,8 +112,8 @@ def get_embedding_service() -> EmbeddingService:
     return _get_embedding_service()
 
 
-def get_vector_store() -> VectorStoreService:
-    """Provide the shared VectorStoreService."""
+def get_vector_store() -> VectorStoreProtocol:
+    """Provide the active vector store (FAISS or Pinecone)."""
     return _get_vector_store()
 
 
@@ -100,3 +125,8 @@ def get_llm_service() -> LLMService:
 def get_retrieval_service() -> RetrievalService:
     """Provide the shared RetrievalService."""
     return _get_retrieval_service()
+
+
+def get_s3_service() -> Optional[S3Service]:
+    """Provide the S3Service when in s3 mode, or None in local mode."""
+    return _get_s3_service()

@@ -1,0 +1,22 @@
+# ============================================================
+# Lambda-specific dependencies
+# ============================================================
+# boto3 is pre-installed in the Lambda runtime — omit to keep
+# the package small. Pin here only as a reference for the version
+# used during development. Uncomment if you need a newer version
+# than what the runtime provides.
+# boto3>=1.35.0,<2.0.0
+
+# --- OpenAI ---
+openai>=1.50.0,<2.0.0
+
+# --- Pinecone ---
+pinecone>=5.0.0
+
+# --- Document parsing ---
+pdfplumber>=0.11.0
+
+# --- Data validation / config ---
+pydantic>=2.9.0,<3.0.0
+pydantic-settings>=2.5.0,<3.0.0
+python-dotenv>=1.0.1
